@@ -69,3 +69,21 @@ ANDROID_HOME=/path/to/android-sdk ./build.sh
 
 `debug.keystore` (password `android`) is a throwaway signing key kept in the repo so each
 build installs over the last one. It protects nothing; do not reuse it elsewhere.
+
+## Last known good version
+
+**Version 1.2** (commit `ac238fd`) is confirmed working on a Fire TV Stick 4K (1st
+generation). A copy of that build is kept at `dist/clean-home-1.2-known-good.apk` and is
+not overwritten by later builds.
+
+To go back to it on the device:
+
+```
+adb install -r -d dist/clean-home-1.2-known-good.apk
+```
+
+To restore the source to that version:
+
+```
+git checkout ac238fd -- firetv-launcher/src firetv-launcher/res firetv-launcher/AndroidManifest.xml
+```
