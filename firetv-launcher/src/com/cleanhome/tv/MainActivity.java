@@ -14,6 +14,10 @@ import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
@@ -51,6 +55,8 @@ public class MainActivity extends Activity {
     private static final String KEY_ORDER = "order";
     private static final String KEY_HIDDEN = "hidden";
     private static final String KEY_SHOWN = "shown";
+
+    private static final String APPSTORE = "com.amazon.venezia";
 
     /** System apps worth showing by default. Every other system app starts out hidden. */
     private static final Set<String> KEEP = new HashSet<>(Arrays.asList(
@@ -237,7 +243,8 @@ public class MainActivity extends Activity {
                 e.isApp = true;
                 e.label = String.valueOf(ri.loadLabel(pm));
                 try {
-                    e.banner = fit(ri.activityInfo.loadBanner(pm), cardW, cardH, true);
+                    e.banner = APPSTORE.equals(pkg) ? appstoreArt()
+                            : fit(ri.activityInfo.loadBanner(pm), cardW, cardH, true);
                 } catch (RuntimeException ignored) {
                 }
                 if (e.banner == null) {
@@ -303,6 +310,38 @@ public class MainActivity extends Activity {
         } catch (RuntimeException | OutOfMemoryError e) {
             return d;
         }
+    }
+
+    /** The Appstore ships only a small grey icon, so its tile is drawn here instead. */
+    private Drawable appstoreArt() {
+        Bitmap bmp = Bitmap.createBitmap(cardW, cardH, Bitmap.Config.ARGB_8888);
+        Canvas canvas = new Canvas(bmp);
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setShader(new LinearGradient(0, 0, cardW, cardH, 0xFF2B7BF0, 0xFF7A4BF5,
+                Shader.TileMode.CLAMP));
+        canvas.drawRect(0, 0, cardW, cardH, paint);
+        paint.setShader(null);
+
+        String text = "Appstore";
+        paint.setTextSize(cardH * 0.21f);
+        paint.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        float glyph = cardH * 0.34f;        // a 2x2 grid of rounded squares
+        float cell = glyph * 0.44f;
+        float space = cardH * 0.11f;
+        float x = (cardW - (glyph + space + paint.measureText(text))) / 2f;
+        float y = (cardH - glyph) / 2f;
+        for (int row = 0; row < 2; row++) {
+            for (int col = 0; col < 2; col++) {
+                float left = x + col * (glyph - cell), top = y + row * (glyph - cell);
+                paint.setColor(row == 1 && col == 1 ? 0x99FFFFFF : Color.WHITE);
+                canvas.drawRoundRect(new RectF(left, top, left + cell, top + cell),
+                        cell * 0.28f, cell * 0.28f, paint);
+            }
+        }
+        paint.setColor(Color.WHITE);
+        float baseline = cardH / 2f - (paint.ascent() + paint.descent()) / 2f;
+        canvas.drawText(text, x + glyph + space, baseline, paint);
+        return new BitmapDrawable(getResources(), bmp);
     }
 
     private static int lighten(int color, float amount) {
