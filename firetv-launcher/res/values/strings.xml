@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Clean Home</string>
+    <string name="service_label">Clean Home button redirect</string>
+    <string name="service_description">Opens Clean Home when the Home button is pressed. It reads no screen content.</string>
+</resources>
