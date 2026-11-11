@@ -9,11 +9,12 @@ and nothing else moves.
 - Apps with wide TV artwork show it; other apps show their icon on a card tinted to match.
 - Hold **Select** (or press **Menu**) on an app to move it, hide it, open its info page or
   uninstall it.
+- System apps are hidden by default, apart from the Appstore, Prime Video and Amazon Music.
+  Bring any of them back from the **Hidden apps** tile.
 - Built-in tiles: **Settings**, **Fire TV Home** (the original Amazon screen, for the
   Appstore and search) and **Hidden apps**.
 
-> Status: the APK builds and passes signature verification, but it has not yet been run on
-> a real Fire TV. Expect to report a bug or two.
+> Status: runs on a Fire TV Stick 4K (1st generation, Fire OS 6). Other models are untested.
 
 ## Install
 

@@ -8,12 +8,14 @@ import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
+import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
@@ -48,6 +50,15 @@ public class MainActivity extends Activity {
     private static final String PREFS = "home";
     private static final String KEY_ORDER = "order";
     private static final String KEY_HIDDEN = "hidden";
+    private static final String KEY_SHOWN = "shown";
+
+    /** System apps worth showing by default. Every other system app starts out hidden. */
+    private static final Set<String> KEEP = new HashSet<>(Arrays.asList(
+            "com.amazon.venezia",        // Appstore
+            "com.amazon.firebat",        // Prime Video
+            "com.amazon.avod",           // Prime Video (other firmware)
+            "com.amazon.bueller.music"   // Amazon Music
+    ));
 
     private static final String TILE_SETTINGS = "tile:settings";
     private static final String TILE_FIRE_HOME = "tile:firehome";
@@ -67,6 +78,7 @@ public class MainActivity extends Activity {
     private LinearLayout grid;
     private ScrollView scroll;
     private List<Entry> entries = new ArrayList<>();
+    private volatile Set<String> autoHidden = new HashSet<>();
     private String focusKey;
     private boolean loading;
     private boolean reloadPending;
@@ -85,45 +97,34 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
 
         int screenW = getResources().getDisplayMetrics().widthPixels;
-        int side = dp(48);
-        gap = dp(18);
+        int side = dp(58);
+        gap = dp(22);
         cardW = (screenW - 2 * side - (COLUMNS - 1) * gap) / COLUMNS;
         cardH = cardW * 9 / 16;
 
         FrameLayout root = new FrameLayout(this);
         root.setBackground(new GradientDrawable(GradientDrawable.Orientation.TL_BR,
-                new int[] {0xFF1D2233, 0xFF0B0C12, 0xFF000000}));
+                new int[] {0xFF2A2D3A, 0xFF14151B, 0xFF08080A}));
         root.setClipChildren(false);
 
         TextClock clock = new TextClock(this);
         clock.setFormat12Hour("h:mm");
         clock.setFormat24Hour("H:mm");
         clock.setTextColor(0xE6FFFFFF);
-        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 30);
+        clock.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
         clock.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         FrameLayout.LayoutParams clockLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.END);
-        clockLp.setMargins(0, dp(30), side, 0);
+        clockLp.setMargins(0, dp(26), side, 0);
         root.addView(clock, clockLp);
-
-        TextClock date = new TextClock(this);
-        date.setFormat12Hour("EEEE, d MMMM");
-        date.setFormat24Hour("EEEE, d MMMM");
-        date.setTextColor(0x99FFFFFF);
-        date.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        FrameLayout.LayoutParams dateLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.START);
-        dateLp.setMargins(side, dp(40), 0, 0);
-        root.addView(date, dateLp);
 
         scroll = new ScrollView(this);
         scroll.setClipChildren(false);
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
         scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroll.setPadding(side, dp(26), side, dp(40));
+        scroll.setPadding(side, dp(30), side, dp(40));
         scroll.setFocusable(false);
 
         grid = new LinearLayout(this);
@@ -135,7 +136,7 @@ public class MainActivity extends Activity {
 
         FrameLayout.LayoutParams scrollLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
-        scrollLp.topMargin = dp(84);
+        scrollLp.topMargin = dp(62);
         root.addView(scroll, scrollLp);
 
         setContentView(root);
@@ -211,6 +212,8 @@ public class MainActivity extends Activity {
     private List<Entry> queryApps() {
         PackageManager pm = getPackageManager();
         Set<String> hidden = hidden();
+        Set<String> shown = new HashSet<>(prefs.getStringSet(KEY_SHOWN, new HashSet<String>()));
+        Set<String> skipped = new HashSet<>();
         Set<String> seen = new HashSet<>();
         List<Entry> apps = new ArrayList<>();
 
@@ -223,20 +226,29 @@ public class MainActivity extends Activity {
                         || hidden.contains(pkg) || !seen.add(pkg)) {
                     continue;
                 }
+                boolean system = (ri.activityInfo.applicationInfo.flags
+                        & ApplicationInfo.FLAG_SYSTEM) != 0;
+                if (system && !KEEP.contains(pkg) && !shown.contains(pkg)) {
+                    skipped.add(pkg);
+                    continue;
+                }
                 Entry e = new Entry();
                 e.key = pkg;
                 e.isApp = true;
                 e.label = String.valueOf(ri.loadLabel(pm));
                 try {
-                    e.banner = ri.activityInfo.loadBanner(pm);
+                    e.banner = fit(ri.activityInfo.loadBanner(pm), cardW, cardH, true);
                 } catch (RuntimeException ignored) {
                 }
                 if (e.banner == null) {
+                    Drawable raw = null;
                     try {
-                        e.icon = ri.loadIcon(pm);
+                        raw = ri.loadIcon(pm);
                     } catch (RuntimeException ignored) {
                     }
-                    e.color = tint(e.icon);
+                    e.color = tint(raw);
+                    int size = cardH * 62 / 100;
+                    e.icon = fit(raw, size, size, false);
                 }
                 apps.add(e);
             }
@@ -259,10 +271,45 @@ public class MainActivity extends Activity {
                 .resolveActivity(pm) != null) {
             apps.add(tile(TILE_FIRE_HOME, "Fire TV Home"));
         }
-        if (!hidden.isEmpty()) {
+        if (!hidden.isEmpty() || !skipped.isEmpty()) {
             apps.add(tile(TILE_HIDDEN, "Hidden apps"));
         }
+        autoHidden = skipped;
         return apps;
+    }
+
+    /**
+     * Draws artwork once into a bitmap of exactly the size it is shown at, so that focus
+     * animations never have to rescale a large image.
+     */
+    private Drawable fit(Drawable d, int w, int h, boolean crop) {
+        if (d == null) {
+            return null;
+        }
+        try {
+            int iw = d.getIntrinsicWidth(), ih = d.getIntrinsicHeight();
+            if (iw <= 0 || ih <= 0) {
+                iw = w;
+                ih = h;
+            }
+            float sx = w / (float) iw, sy = h / (float) ih;
+            float scale = crop ? Math.max(sx, sy) : Math.min(sx, sy);
+            int dw = Math.round(iw * scale), dh = Math.round(ih * scale);
+            Bitmap bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            int left = (w - dw) / 2, top = (h - dh) / 2;
+            d.setBounds(left, top, left + dw, top + dh);
+            d.draw(new Canvas(bmp));
+            return new BitmapDrawable(getResources(), bmp);
+        } catch (RuntimeException | OutOfMemoryError e) {
+            return d;
+        }
+    }
+
+    private static int lighten(int color, float amount) {
+        return Color.rgb(
+                Math.round(Color.red(color) + (255 - Color.red(color)) * amount),
+                Math.round(Color.green(color) + (255 - Color.green(color)) * amount),
+                Math.round(Color.blue(color) + (255 - Color.blue(color)) * amount));
     }
 
     private static Entry tile(String key, String label) {
@@ -300,8 +347,8 @@ public class MainActivity extends Activity {
                 return 0xFF2C2C2E;
             }
             // Darken so a bright icon still stands out against its card.
-            return Color.rgb((int) (r / n * 0.42f) + 18, (int) (g / n * 0.42f) + 18,
-                    (int) (b / n * 0.42f) + 18);
+            return Color.rgb((int) (r / n * 0.5f) + 20, (int) (g / n * 0.5f) + 20,
+                    (int) (b / n * 0.5f) + 20);
         } catch (RuntimeException e) {
             return 0xFF2C2C2E;
         }
@@ -325,7 +372,17 @@ public class MainActivity extends Activity {
                 row.setClipToPadding(false);
                 LinearLayout.LayoutParams rowLp = new LinearLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-                rowLp.bottomMargin = dp(10);
+                rowLp.bottomMargin = dp(8);
+                if (i == 0) {
+                    // The first row sits on a soft shelf, like a dock for favourite apps.
+                    int pad = dp(18);
+                    GradientDrawable shelf = new GradientDrawable();
+                    shelf.setColor(0x1FFFFFFF);
+                    shelf.setCornerRadius(dp(26));
+                    row.setBackground(shelf);
+                    row.setPadding(pad, pad, pad, dp(6));
+                    rowLp.setMargins(-pad, 0, -pad, dp(20));
+                }
                 grid.addView(row, rowLp);
             }
             LinearLayout.LayoutParams cellLp = new LinearLayout.LayoutParams(
@@ -355,9 +412,10 @@ public class MainActivity extends Activity {
         card.setTag(e.key);
         card.setFocusable(true);
         card.setFocusableInTouchMode(true);
-        GradientDrawable bg = new GradientDrawable();
-        bg.setColor(e.banner != null ? 0xFF1C1C1E : e.color);
-        bg.setCornerRadius(dp(10));
+        GradientDrawable bg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                e.banner != null ? new int[] {0xFF1C1C1E, 0xFF1C1C1E}
+                        : new int[] {lighten(e.color, 0.16f), e.color});
+        bg.setCornerRadius(dp(14));
         card.setBackground(bg);
         card.setClipToOutline(true);
         card.setElevation(dp(2));
@@ -372,7 +430,7 @@ public class MainActivity extends Activity {
             ImageView art = new ImageView(this);
             art.setScaleType(ImageView.ScaleType.FIT_CENTER);
             art.setImageDrawable(e.icon);
-            int size = cardH * 58 / 100;
+            int size = cardH * 62 / 100;
             card.addView(art, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
         } else {
             TextView name = new TextView(this);
@@ -389,7 +447,8 @@ public class MainActivity extends Activity {
         final TextView label = new TextView(this);
         label.setText(e.label);
         label.setTextColor(Color.WHITE);
-        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        label.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
+        label.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         label.setSingleLine(true);
         label.setEllipsize(TextUtils.TruncateAt.END);
         label.setGravity(Gravity.CENTER_HORIZONTAL);
@@ -402,9 +461,9 @@ public class MainActivity extends Activity {
         card.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(View v, boolean hasFocus) {
-                float scale = hasFocus ? 1.12f : 1f;
+                float scale = hasFocus ? 1.13f : 1f;
                 v.animate().scaleX(scale).scaleY(scale)
-                        .translationZ(hasFocus ? dp(14) : 0).setDuration(140).start();
+                        .translationZ(hasFocus ? dp(16) : 0).setDuration(150).withLayer().start();
                 label.animate().alpha(hasFocus ? 1f : 0f).setDuration(140).start();
             }
         });
@@ -544,7 +603,9 @@ public class MainActivity extends Activity {
     }
 
     private void showHidden() {
-        final List<String> pkgs = new ArrayList<>(hidden());
+        Set<String> all = hidden();
+        all.addAll(autoHidden);
+        final List<String> pkgs = new ArrayList<>(all);
         final String[] labels = new String[pkgs.size()];
         PackageManager pm = getPackageManager();
         for (int i = 0; i < labels.length; i++) {
@@ -561,7 +622,11 @@ public class MainActivity extends Activity {
                     public void onClick(DialogInterface dialog, int which) {
                         Set<String> hidden = hidden();
                         hidden.remove(pkgs.get(which));
-                        prefs.edit().putStringSet(KEY_HIDDEN, hidden).apply();
+                        Set<String> shown = new HashSet<>(
+                                prefs.getStringSet(KEY_SHOWN, new HashSet<String>()));
+                        shown.add(pkgs.get(which));
+                        prefs.edit().putStringSet(KEY_HIDDEN, hidden)
+                                .putStringSet(KEY_SHOWN, shown).apply();
                         loadApps();
                     }
                 })
